@@ -1,39 +1,42 @@
 const express = require("express");
 const http = require("http");
-const { Server } = require("socket.io");
 const path = require("path");
+const { Server } = require("socket.io");
+const cors = require("cors");
+
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
+const io = new Server(server, {
+  cors: {
+    origin: "*",
+    methods: ["GET", "POST"]
+  }
+});
 
+app.use(cors());
+
+// ✅ Ajoute ceci pour servir call.html
 app.use(express.static(path.join(__dirname)));
 
-io.on("connection", socket => {
-  console.log("🟢 Utilisateur connecté :", socket.id);
+// ✅ Page par défaut quand on va sur /
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "call.html"));
+});
 
-  socket.on("join", room => {
-    socket.join(room);
-    socket.to(room).emit("ready");
-  });
+io.on("connection", (socket) => {
+  console.log("🟢 Nouveau client connecté :", socket.id);
 
-  socket.on("offer", (room, offer) => {
-    socket.to(room).emit("offer", offer);
-  });
-
-  socket.on("answer", (room, answer) => {
-    socket.to(room).emit("answer", answer);
-  });
-
-  socket.on("ice-candidate", (room, candidate) => {
-    socket.to(room).emit("ice-candidate", candidate);
+  socket.on("message", (data) => {
+    console.log("💬 Reçu :", data);
+    io.emit("message", data);
   });
 
   socket.on("disconnect", () => {
-    console.log("🔴 Déconnecté :", socket.id);
+    console.log("🔴 Client déconnecté :", socket.id);
   });
 });
 
-const PORT = process.env.PORT || 3002;
+const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
-  console.log(`🚀 Serveur WebRTC en ligne sur http://localhost:${PORT}`);
+  console.log(`🚀 Serveur lancé sur http://localhost:${PORT}`);
 });
