@@ -35,6 +35,23 @@ io.on("connection", (socket) => {
     console.log("🔴 Client déconnecté :", socket.id);
   });
 });
+socket.on("join", (room) => {
+  socket.join(room);
+  socket.to(room).emit("joined");
+});
+
+socket.on("offer", ({ room, offer }) => {
+  socket.to(room).emit("offer", { offer });
+});
+
+socket.on("answer", ({ room, answer }) => {
+  socket.to(room).emit("answer", { answer });
+});
+
+socket.on("candidate", ({ room, candidate }) => {
+  socket.to(room).emit("candidate", { candidate });
+});
+
 
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
