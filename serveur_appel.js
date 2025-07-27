@@ -1,59 +1,60 @@
 const express = require("express");
 const http = require("http");
-const path = require("path");
 const { Server } = require("socket.io");
 const cors = require("cors");
 
 const app = express();
+app.use(cors());
+app.use(express.static("public")); // pour servir call.html
+
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: "*",
+    origin: "*", // à restreindre si besoin
     methods: ["GET", "POST"]
   }
 });
 
-app.use(cors());
-
-// ✅ Ajoute ceci pour servir call.html
-app.use(express.static(path.join(__dirname)));
-
-// ✅ Page par défaut quand on va sur /
+// Page d'accueil simple
 app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "call.html"));
+  res.send("🟢 Serveur WebRTC en ligne !");
 });
 
 io.on("connection", (socket) => {
-  console.log("🟢 Nouveau client connecté :", socket.id);
+  console.log("🟢 Client connecté :", socket.id);
 
-  socket.on("message", (data) => {
-    console.log("💬 Reçu :", data);
-    io.emit("message", data);
+  // 1. Un utilisateur rejoint une room
+  socket.on("join", (room) => {
+    socket.join(room);
+    console.log(`👥 ${socket.id} a rejoint la room ${room}`);
+    socket.to(room).emit("joined");
+  });
+
+  // 2. Un utilisateur envoie une offre SDP
+  socket.on("offer", ({ room, offer }) => {
+    console.log("📤 Offre reçue pour room :", room);
+    socket.to(room).emit("offer", { offer });
+  });
+
+  // 3. Un utilisateur envoie une réponse SDP
+  socket.on("answer", ({ room, answer }) => {
+    console.log("📥 Réponse envoyée pour room :", room);
+    socket.to(room).emit("answer", { answer });
+  });
+
+  // 4. Un utilisateur envoie un candidat ICE
+  socket.on("candidate", ({ room, candidate }) => {
+    socket.to(room).emit("candidate", { candidate });
   });
 
   socket.on("disconnect", () => {
     console.log("🔴 Client déconnecté :", socket.id);
   });
 });
-socket.on("join", (room) => {
-  socket.join(room);
-  socket.to(room).emit("joined");
-});
 
-socket.on("offer", ({ room, offer }) => {
-  socket.to(room).emit("offer", { offer });
-});
-
-socket.on("answer", ({ room, answer }) => {
-  socket.to(room).emit("answer", { answer });
-});
-
-socket.on("candidate", ({ room, candidate }) => {
-  socket.to(room).emit("candidate", { candidate });
-});
-
-
-const PORT = process.env.PORT || 3001;
+// Lancer le serveur
+const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`🚀 Serveur lancé sur http://localhost:${PORT}`);
 });
+
