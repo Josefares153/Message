@@ -2,6 +2,7 @@ const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
 const cors = require("cors");
+const path = require("path");
 
 const app = express();
 app.use(cors());
@@ -16,25 +17,23 @@ const io = new Server(server, {
 });
 
 app.get("/", (req, res) => {
-  res.send("🟢 Serveur WebRTC en ligne !");
+  res.sendFile(path.join(__dirname, "public", "call.html"));
 });
 
 io.on("connection", (socket) => {
-  console.log("🟢 Client connecté :", socket.id);
+  console.log("🟢 Nouveau client :", socket.id);
 
-  socket.on("join", (room) => {
+  socket.on("join", ({ room, user }) => {
     socket.join(room);
-    console.log(`👥 ${socket.id} a rejoint la room ${room}`);
-    socket.to(room).emit("joined");
+    socket.to(room).emit("incoming", `📞 Appel de ${user}`);
+    socket.emit("joined", `✅ Connecté à la salle ${room}`);
   });
 
   socket.on("offer", ({ room, offer }) => {
-    console.log("📤 Offre reçue pour room :", room);
     socket.to(room).emit("offer", { offer });
   });
 
   socket.on("answer", ({ room, answer }) => {
-    console.log("📥 Réponse envoyée pour room :", room);
     socket.to(room).emit("answer", { answer });
   });
 
@@ -43,11 +42,11 @@ io.on("connection", (socket) => {
   });
 
   socket.on("disconnect", () => {
-    console.log("🔴 Client déconnecté :", socket.id);
+    console.log("🔴 Déconnecté :", socket.id);
   });
 });
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`🚀 Serveur lancé sur http://localhost:${PORT}`);
+  console.log("🚀 Serveur WebRTC lancé sur http://localhost:" + PORT);
 });
