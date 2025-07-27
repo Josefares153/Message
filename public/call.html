@@ -46,7 +46,7 @@
   </style>
 </head>
 <body>
-  <div id="status">⏳ Connexion en cours...</div>
+  <div id="status">⏳ Connexion...</div>
   <video id="localVideo" autoplay muted></video>
   <video id="remoteVideo" autoplay></video>
 
@@ -62,46 +62,49 @@
 
   <script src="https://cdn.socket.io/4.3.2/socket.io.min.js"></script>
   <script>
+    const params = new URLSearchParams(window.location.search);
+    const room = params.get("room") || "default";
+    const user = params.get("user") || "Anonyme";
+    const estAppelant = params.get("caller") === "1";
+
     const localVideo = document.getElementById("localVideo");
     const remoteVideo = document.getElementById("remoteVideo");
     const popup = document.getElementById("appelPopup");
     const appelantText = document.getElementById("appelant");
     const status = document.getElementById("status");
 
-    const params = new URLSearchParams(window.location.search);
-    const room = params.get("room") || "default";
-    const user = params.get("user") || "Anonyme";
-
     const socket = io();
     let localStream = null;
     let peerConnection = null;
-    let estAppelant = false;
 
     const config = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
 
-    socket.emit("join", { room, user });
-
-    socket.on("joined", (msg) => {
-      estAppelant = true;
-      status.innerText = msg;
-      demarrerFlux().then(() => initPeer(true));
-    });
-
-    socket.on("incoming", (fromUser) => {
-      status.innerText = "🔔 Appel entrant";
-      appelantText.innerText = `📞 Appel de ${fromUser}`;
+    socket.on("appel_recu", ({ from }) => {
+      appelantText.textContent = "📞 Appel de " + from;
       popup.style.display = "flex";
+      status.textContent = "🔔 Appel entrant...";
     });
 
-    async function accepterAppel() {
-      popup.style.display = "none";
+    socket.on("joined", async (msg) => {
+      status.textContent = msg;
       await demarrerFlux();
-      initPeer(false);
+      initPeer(estAppelant);
+    });
+
+    if (estAppelant) {
+      socket.emit("appel", { room, from: user });
+      status.textContent = "📞 Appel lancé...";
+      socket.emit("join", { room, user });
+    }
+
+    function accepterAppel() {
+      popup.style.display = "none";
+      socket.emit("join", { room, user });
     }
 
     function refuserAppel() {
       popup.style.display = "none";
-      status.innerText = "❌ Appel refusé";
+      status.textContent = "❌ Appel refusé";
     }
 
     async function demarrerFlux() {
@@ -109,21 +112,18 @@
         localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
         localVideo.srcObject = localStream;
       } catch (err) {
-        alert("Erreur caméra/micro : " + err.message);
+        alert("Erreur : " + err.message);
       }
     }
 
     function initPeer(isCaller) {
       peerConnection = new RTCPeerConnection(config);
-
       localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
-
       peerConnection.ontrack = ({ streams: [stream] }) => {
         remoteVideo.srcObject = stream;
       };
-
-      peerConnection.onicecandidate = ({ candidate }) => {
-        if (candidate) socket.emit("candidate", { room, candidate });
+      peerConnection.onicecandidate = e => {
+        if (e.candidate) socket.emit("candidate", { room, candidate: e.candidate });
       };
 
       if (isCaller) {
@@ -146,9 +146,7 @@
     });
 
     socket.on("candidate", async ({ candidate }) => {
-      if (peerConnection) {
-        await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
-      }
+      if (peerConnection) await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
     });
 
     function raccrocher() {
