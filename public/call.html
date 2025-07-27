@@ -5,7 +5,7 @@
   <title>Appel WebRTC</title>
   <style>
     body {
-      background: #202020;
+      background: #222;
       color: white;
       font-family: sans-serif;
       display: flex;
@@ -17,142 +17,133 @@
     video {
       width: 45%;
       margin: 10px;
-      border-radius: 10px;
       background: black;
+      border-radius: 8px;
     }
-    .controls {
-      margin-top: 10px;
-    }
-    #appelPopup {
+    #popup {
+      display: none;
+      position: absolute;
       background: #333;
       border: 2px solid #555;
-      border-radius: 10px;
       padding: 20px;
-      display: none;
-      flex-direction: column;
-      align-items: center;
+      border-radius: 10px;
+      top: 20px;
+      z-index: 10;
     }
     button {
-      padding: 8px 16px;
+      margin: 10px;
+      padding: 10px;
       font-size: 16px;
-      margin: 5px;
-      border: none;
-      border-radius: 5px;
-      cursor: pointer;
-    }
-    #status {
-      margin-bottom: 10px;
     }
   </style>
 </head>
 <body>
-  <div id="status">⏳ Connexion...</div>
-  <video id="localVideo" autoplay muted></video>
-  <video id="remoteVideo" autoplay></video>
+  <h2 id="etat">Initialisation...</h2>
+  <video id="local" autoplay muted></video>
+  <video id="remote" autoplay></video>
 
-  <div id="appelPopup">
-    <div id="appelant">📞 Appel de ...</div>
+  <div id="popup">
+    <p id="appelant"></p>
     <button onclick="accepterAppel()">✅ Accepter</button>
     <button onclick="refuserAppel()">❌ Refuser</button>
   </div>
 
-  <div class="controls">
-    <button onclick="raccrocher()">Raccrocher</button>
-  </div>
-
-  <script src="https://cdn.socket.io/4.3.2/socket.io.min.js"></script>
+  <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
   <script>
-    const params = new URLSearchParams(window.location.search);
-    const room = params.get("room") || "default";
-    const user = params.get("user") || "Anonyme";
+    const params = new URLSearchParams(location.search);
+    const user = params.get("user");
+    const dest = params.get("dest");
     const estAppelant = params.get("caller") === "1";
 
-    const localVideo = document.getElementById("localVideo");
-    const remoteVideo = document.getElementById("remoteVideo");
-    const popup = document.getElementById("appelPopup");
+    const socket = io("https://appel-nmnx.onrender.com");
+    const etat = document.getElementById("etat");
+    const popup = document.getElementById("popup");
     const appelantText = document.getElementById("appelant");
-    const status = document.getElementById("status");
 
-    const socket = io();
-    let localStream = null;
-    let peerConnection = null;
+    const localVideo = document.getElementById("local");
+    const remoteVideo = document.getElementById("remote");
+    let peer = null;
+    let localStream;
 
-    const config = { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
+    socket.on("connect", async () => {
+      socket.emit("register", user);
+      etat.textContent = "Connecté comme " + user;
+
+      localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      localVideo.srcObject = localStream;
+
+      if (estAppelant) {
+        etat.textContent = `Appel en cours vers ${dest}...`;
+        socket.emit("appel_utilisateur", { to: dest, from: user });
+      }
+    });
 
     socket.on("appel_recu", ({ from }) => {
-      appelantText.textContent = "📞 Appel de " + from;
-      popup.style.display = "flex";
-      status.textContent = "🔔 Appel entrant...";
+      appelantText.textContent = `📞 Appel de ${from}`;
+      popup.style.display = "block";
+      etat.textContent = `📞 Appel entrant...`;
+      window._appelant = from;
     });
-
-    socket.on("joined", async (msg) => {
-      status.textContent = msg;
-      await demarrerFlux();
-      initPeer(estAppelant);
-    });
-
-    if (estAppelant) {
-      socket.emit("appel", { room, from: user });
-      status.textContent = "📞 Appel lancé...";
-      socket.emit("join", { room, user });
-    }
 
     function accepterAppel() {
       popup.style.display = "none";
-      socket.emit("join", { room, user });
+      socket.emit("appel_accepte", { from: window._appelant });
+      lancerPeer(false);
     }
 
     function refuserAppel() {
       popup.style.display = "none";
-      status.textContent = "❌ Appel refusé";
+      etat.textContent = "❌ Appel refusé";
+      socket.emit("appel_refuse", { from: window._appelant });
     }
 
-    async function demarrerFlux() {
-      try {
-        localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-        localVideo.srcObject = localStream;
-      } catch (err) {
-        alert("Erreur : " + err.message);
-      }
-    }
+    socket.on("appel_accepte_par", ({ by }) => {
+      etat.textContent = `${by} a accepté l'appel`;
+      lancerPeer(true);
+    });
 
-    function initPeer(isCaller) {
-      peerConnection = new RTCPeerConnection(config);
-      localStream.getTracks().forEach(track => peerConnection.addTrack(track, localStream));
-      peerConnection.ontrack = ({ streams: [stream] }) => {
+    socket.on("appel_refuse_par", ({ by }) => {
+      etat.textContent = `${by} a refusé l'appel`;
+    });
+
+    function lancerPeer(isCaller) {
+      peer = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+
+      localStream.getTracks().forEach(track => peer.addTrack(track, localStream));
+
+      peer.ontrack = ({ streams: [stream] }) => {
         remoteVideo.srcObject = stream;
       };
-      peerConnection.onicecandidate = e => {
-        if (e.candidate) socket.emit("candidate", { room, candidate: e.candidate });
+
+      peer.onicecandidate = e => {
+        if (e.candidate) {
+          socket.emit("candidate", { to: isCaller ? dest : window._appelant, candidate: e.candidate });
+        }
       };
 
       if (isCaller) {
-        peerConnection.createOffer()
-          .then(offer => peerConnection.setLocalDescription(offer))
-          .then(() => socket.emit("offer", { room, offer: peerConnection.localDescription }));
+        peer.createOffer()
+          .then(offer => peer.setLocalDescription(offer))
+          .then(() => {
+            socket.emit("offer", { to: dest, offer: peer.localDescription });
+          });
       }
     }
 
     socket.on("offer", async ({ offer }) => {
-      if (!peerConnection) initPeer(false);
-      await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
-      const answer = await peerConnection.createAnswer();
-      await peerConnection.setLocalDescription(answer);
-      socket.emit("answer", { room, answer });
+      await peer.setRemoteDescription(new RTCSessionDescription(offer));
+      const answer = await peer.createAnswer();
+      await peer.setLocalDescription(answer);
+      socket.emit("answer", { to: window._appelant, answer });
     });
 
     socket.on("answer", async ({ answer }) => {
-      await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
+      await peer.setRemoteDescription(new RTCSessionDescription(answer));
     });
 
     socket.on("candidate", async ({ candidate }) => {
-      if (peerConnection) await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+      await peer.addIceCandidate(new RTCIceCandidate(candidate));
     });
-
-    function raccrocher() {
-      if (peerConnection) peerConnection.close();
-      window.close();
-    }
   </script>
 </body>
 </html>
