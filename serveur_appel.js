@@ -21,12 +21,18 @@ app.get("/", (req, res) => {
 });
 
 io.on("connection", (socket) => {
-  console.log("🟢 Nouveau client :", socket.id);
+  console.log("🟢 Client connecté :", socket.id);
 
+  // Appelant → notifie l'autre
+  socket.on("appel", ({ room, from }) => {
+    socket.to(room).emit("appel_recu", { from });
+  });
+
+  // Appelé ou appelant → rejoint après acceptation
   socket.on("join", ({ room, user }) => {
     socket.join(room);
-    socket.to(room).emit("incoming", `📞 Appel de ${user}`);
-    socket.emit("joined", `✅ Connecté à la salle ${room}`);
+    socket.to(room).emit("notif", `${user} a rejoint l'appel`);
+    socket.emit("joined", `✅ Rejoint la salle ${room}`);
   });
 
   socket.on("offer", ({ room, offer }) => {
@@ -48,5 +54,5 @@ io.on("connection", (socket) => {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log("🚀 Serveur WebRTC lancé sur http://localhost:" + PORT);
+  console.log("🚀 Serveur WebRTC sur http://localhost:" + PORT);
 });
