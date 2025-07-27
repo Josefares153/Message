@@ -1,12 +1,12 @@
+// serveur_appel.js - Serveur Node.js pour appels directs entre utilisateurs
+
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
 const cors = require("cors");
-const path = require("path");
 
 const app = express();
 app.use(cors());
-app.use(express.static("public"));
 
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -16,43 +16,55 @@ const io = new Server(server, {
   }
 });
 
-app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "public", "call.html"));
-});
+const utilisateursConnectes = {}; // username -> socket.id
 
 io.on("connection", (socket) => {
-  console.log("🟢 Client connecté :", socket.id);
+  console.log("🔌 Nouveau client :", socket.id);
 
-  // Appelant → notifie l'autre
-  socket.on("appel", ({ room, from }) => {
-    socket.to(room).emit("appel_recu", { from });
+  // Étape 1 : enregistrement du username
+  socket.on("register", (username) => {
+    utilisateursConnectes[username] = socket.id;
+    socket.username = username;
+    console.log("✅ Utilisateur enregistré :", username);
   });
 
-  // Appelé ou appelant → rejoint après acceptation
-  socket.on("join", ({ room, user }) => {
-    socket.join(room);
-    socket.to(room).emit("notif", `${user} a rejoint l'appel`);
-    socket.emit("joined", `✅ Rejoint la salle ${room}`);
+  // Étape 2 : appel lancé vers un autre utilisateur
+  socket.on("appel_utilisateur", ({ to, from }) => {
+    const destSocketId = utilisateursConnectes[to];
+    if (destSocketId) {
+      io.to(destSocketId).emit("appel_recu", { from });
+      console.log(`📞 Appel de ${from} vers ${to}`);
+    } else {
+      socket.emit("erreur_appel", `${to} n'est pas en ligne`);
+    }
   });
 
-  socket.on("offer", ({ room, offer }) => {
-    socket.to(room).emit("offer", { offer });
+  // Étape 3 : acceptation de l'appel (par l'appelé)
+  socket.on("appel_accepte", ({ from }) => {
+    const fromSocketId = utilisateursConnectes[from];
+    if (fromSocketId) {
+      io.to(fromSocketId).emit("appel_accepte_par", { by: socket.username });
+    }
   });
 
-  socket.on("answer", ({ room, answer }) => {
-    socket.to(room).emit("answer", { answer });
+  // Étape 4 : refus de l'appel
+  socket.on("appel_refuse", ({ from }) => {
+    const fromSocketId = utilisateursConnectes[from];
+    if (fromSocketId) {
+      io.to(fromSocketId).emit("appel_refuse_par", { by: socket.username });
+    }
   });
 
-  socket.on("candidate", ({ room, candidate }) => {
-    socket.to(room).emit("candidate", { candidate });
-  });
-
+  // Déconnexion : suppression de la map
   socket.on("disconnect", () => {
-    console.log("🔴 Déconnecté :", socket.id);
+    if (socket.username) {
+      console.log("❌ Déconnecté :", socket.username);
+      delete utilisateursConnectes[socket.username];
+    }
   });
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
-  console.log("🚀 Serveur WebRTC sur http://localhost:" + PORT);
+  console.log("🚀 Serveur d'appel WebRTC lancé sur port", PORT);
 });
